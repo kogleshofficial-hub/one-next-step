@@ -633,13 +633,14 @@ export default function Home() {
         </section>
 
         {/* Footer */}
-        <footer className="flex flex-col gap-3 border-t border-white/[0.06] py-6 text-[10px] uppercase tracking-[0.12em] text-white/15 sm:flex-row sm:items-center sm:justify-between">
-          <span>© {new Date().getFullYear()} One Next Step</span>
+        <footer className="flex flex-col gap-3 border-t border-white/[0.07] py-6 text-xs text-white/25 sm:flex-row sm:items-center sm:justify-between">
+  <span>© {new Date().getFullYear()} One Next Step</span>
 
-          <span>
-            Less planning. More movement.
-          </span>
-        </footer>
+  <div className="flex flex-col gap-1 sm:items-end">
+    <span>Built for people who are stuck.</span>
+    <span className="text-white/15">Created by Koglesh R. Murugan</span>
+  </div>
+</footer>
       </div>
     </main>
   );
