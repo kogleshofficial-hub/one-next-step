@@ -36,6 +36,7 @@ export const metadata: Metadata = {
       "You don't need the whole plan. You need the next move.",
     type: "website",
     siteName: "One Next Step",
+    url: "https://one-next-step.vercel.app",
   },
 
   twitter: {
