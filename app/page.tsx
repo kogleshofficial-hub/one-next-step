@@ -212,6 +212,10 @@ export default function Home() {
       <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 sm:px-8 lg:px-12">
         {/* Navigation */}
         <header className="flex items-center justify-between border-b border-white/[0.06] py-6">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/30">
+            Koglesh R. Murugan
+          </div>
+
           <button
             type="button"
             onClick={handleReset}
