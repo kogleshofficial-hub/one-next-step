@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import { generateNextStep } from "../../../providers/ai-provider";
 
 const MAX_PROBLEM_LENGTH = 1000;
+const MAX_COMPLETED_STEP_LENGTH = 1000;
+
 const MAX_REQUESTS_PER_WINDOW = 10;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
 type RequestBody = {
   problem?: unknown;
+  completedStep?: unknown;
 };
 
 type RateLimitEntry = {
@@ -104,7 +107,30 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await generateNextStep(problem);
+    let completedStep: string | undefined;
+
+    if (typeof body.completedStep === "string") {
+      completedStep = body.completedStep.trim();
+
+      if (completedStep.length > MAX_COMPLETED_STEP_LENGTH) {
+        return NextResponse.json(
+          {
+            error:
+              "The completed step is too long. Please try again.",
+          },
+          { status: 400 }
+        );
+      }
+
+      if (!completedStep) {
+        completedStep = undefined;
+      }
+    }
+
+    const result = await generateNextStep({
+      problem,
+      completedStep,
+    });
 
     return NextResponse.json(result);
   } catch (error) {

@@ -12,6 +12,11 @@ const client = new InferenceClient(token);
 
 const MODEL = "Qwen/Qwen3-4B-Instruct-2507";
 
+type GenerateNextStepOptions = {
+  problem: string;
+  completedStep?: string;
+};
+
 function extractJson(text: string): unknown {
   const cleaned = text
     .trim()
@@ -22,11 +27,14 @@ function extractJson(text: string): unknown {
   try {
     return JSON.parse(cleaned);
   } catch {
-    // Try to find the first complete JSON object inside surrounding text.
     const firstBrace = cleaned.indexOf("{");
     const lastBrace = cleaned.lastIndexOf("}");
 
-    if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    if (
+      firstBrace === -1 ||
+      lastBrace === -1 ||
+      lastBrace <= firstBrace
+    ) {
       throw new Error("No JSON object was found in the AI response.");
     }
 
@@ -37,18 +45,48 @@ function extractJson(text: string): unknown {
 }
 
 export async function generateNextStep(
-  problem: string
+  options: GenerateNextStepOptions
 ): Promise<NextStepResult> {
-  const response = await client.chatCompletion({
-    model: MODEL,
-    messages: [
-      {
-        role: "system",
-        content: NEXT_STEP_SYSTEM_PROMPT,
-      },
-      {
-        role: "user",
-        content: `
+  const { problem, completedStep } = options;
+
+  const userPrompt = completedStep
+    ? `
+Return ONLY a valid JSON object.
+
+Do not use Markdown.
+Do not use code fences.
+Do not write an introduction.
+Do not write anything before or after the JSON.
+
+The JSON must contain exactly these fields:
+- nextStep
+- why
+- time
+- ignore
+
+The "ignore" field must be an array of strings.
+
+This person originally described this problem:
+
+${problem}
+
+They have now completed this previous step:
+
+${completedStep}
+
+Now determine the SINGLE most useful next action.
+
+Important:
+- Do NOT repeat the completed step.
+- Do NOT give a full plan.
+- Do NOT give multiple actions.
+- Build naturally from the progress they have already made.
+- Keep the new action specific and immediately doable.
+- The new action should move them closer to solving the original problem.
+
+Return ONLY the JSON object.
+`.trim()
+    : `
 Return ONLY a valid JSON object.
 
 Do not use Markdown.
@@ -67,7 +105,24 @@ The "ignore" field must be an array of strings.
 User's problem:
 
 ${problem}
-        `.trim(),
+
+Determine the SINGLE most useful next action.
+
+The action should be specific, realistic, and immediately doable.
+
+Return ONLY the JSON object.
+`.trim();
+
+  const response = await client.chatCompletion({
+    model: MODEL,
+    messages: [
+      {
+        role: "system",
+        content: NEXT_STEP_SYSTEM_PROMPT,
+      },
+      {
+        role: "user",
+        content: userPrompt,
       },
     ],
     max_tokens: 500,
