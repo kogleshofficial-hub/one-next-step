@@ -2,6 +2,8 @@
 
 > **You don't need the whole plan. You need the next move.**
 
+![One Next Step — AI decision tool](./public/one-next-step-preview.png)
+
 One Next Step is a focused AI decision tool designed for moments when you're stuck, overwhelmed, confused, or unsure where to begin.
 
 Instead of generating a huge plan, it identifies **one concrete action** you can take right now.
