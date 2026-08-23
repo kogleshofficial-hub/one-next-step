@@ -12,10 +12,19 @@ const client = new InferenceClient(token);
 
 const MODEL = "Qwen/Qwen3-4B-Instruct-2507";
 
+const MAX_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 500;
+const MAX_OUTPUT_TOKENS = 500;
+const TEMPERATURE = 0.15;
+
 type GenerateNextStepOptions = {
   problem: string;
   completedStep?: string;
 };
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function extractJson(text: string): unknown {
   const cleaned = text
@@ -27,6 +36,8 @@ function extractJson(text: string): unknown {
   try {
     return JSON.parse(cleaned);
   } catch {
+    // Some models occasionally add a short sentence before the JSON.
+    // Recover the outermost JSON object without accepting arbitrary prose.
     const firstBrace = cleaned.indexOf("{");
     const lastBrace = cleaned.lastIndexOf("}");
 
@@ -38,81 +49,164 @@ function extractJson(text: string): unknown {
       throw new Error("No JSON object was found in the AI response.");
     }
 
-    const possibleJson = cleaned.slice(firstBrace, lastBrace + 1);
+    const candidate = cleaned.slice(firstBrace, lastBrace + 1);
 
-    return JSON.parse(possibleJson);
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      throw new Error("The AI returned malformed JSON.");
+    }
   }
 }
 
-export async function generateNextStep(
-  options: GenerateNextStepOptions
-): Promise<NextStepResult> {
-  const { problem, completedStep } = options;
-
-  const userPrompt = completedStep
+function buildUserPrompt({
+  problem,
+  completedStep,
+}: GenerateNextStepOptions): string {
+  const continuationContext = completedStep
     ? `
-Return ONLY a valid JSON object.
+This is a continuation.
 
-Do not use Markdown.
-Do not use code fences.
-Do not write an introduction.
-Do not write anything before or after the JSON.
-
-The JSON must contain exactly these fields:
-- nextStep
-- why
-- time
-- ignore
-
-The "ignore" field must be an array of strings.
-
-This person originally described this problem:
-
+ORIGINAL PROBLEM:
 ${problem}
 
-They have now completed this previous step:
-
+STEP THE USER ALREADY COMPLETED:
 ${completedStep}
 
-Now determine the SINGLE most useful next action.
+The completed step is genuine progress.
 
-Important:
-- Do NOT repeat the completed step.
-- Do NOT give a full plan.
-- Do NOT give multiple actions.
-- Build naturally from the progress they have already made.
-- Keep the new action specific and immediately doable.
-- The new action should move them closer to solving the original problem.
+Your job is to identify the NEXT smallest meaningful action.
 
-Return ONLY the JSON object.
-`.trim()
+The new action MUST:
+- logically follow from the completed step;
+- never repeat the completed step;
+- address the next meaningful bottleneck;
+- be possible to begin immediately;
+- contain exactly ONE primary action;
+- not become a checklist or multi-step plan;
+- remain proportional to the original problem.
+`
     : `
-Return ONLY a valid JSON object.
-
-Do not use Markdown.
-Do not use code fences.
-Do not write an introduction.
-Do not write anything before or after the JSON.
-
-The JSON must contain exactly these fields:
-- nextStep
-- why
-- time
-- ignore
-
-The "ignore" field must be an array of strings.
-
-User's problem:
-
+ORIGINAL PROBLEM:
 ${problem}
 
-Determine the SINGLE most useful next action.
+This is the user's first step.
 
-The action should be specific, realistic, and immediately doable.
+Identify the smallest meaningful action that creates real forward movement.
 
-Return ONLY the JSON object.
+The action MUST:
+- address the actual blocker;
+- be specific enough to begin immediately;
+- be meaningful rather than merely easy;
+- contain exactly ONE primary action;
+- not become a checklist or multi-step plan.
+`;
+
+  return `
+Return ONLY one valid JSON object.
+
+No Markdown.
+No code fences.
+No introduction.
+No explanation outside the JSON.
+No additional fields.
+
+Required JSON shape:
+
+{
+  "nextStep": "one specific action",
+  "why": "a brief explanation of why this comes first",
+  "time": "a realistic estimate",
+  "ignore": [
+    "thing to ignore for now",
+    "thing to ignore for now",
+    "thing to ignore for now"
+  ]
+}
+
+CRITICAL RULE:
+
+"nextStep" must describe ONE primary action.
+
+Do NOT hide multiple actions inside one sentence using words such as:
+"and then"
+"then"
+"after that"
+"followed by"
+"while"
+"also"
+
+If completing the action naturally requires several tiny physical movements, that is acceptable. But the user should have ONE clear objective, not a sequence of objectives.
+
+"ignore" should contain 2–4 relevant distractions, premature concerns, or later decisions.
+
+"why" should normally be 1–2 concise sentences.
+
+"time" should be realistic and simple, such as:
+"5 minutes"
+"10 minutes"
+"15–20 minutes"
+"30 minutes"
+
+Do not invent facts about the user.
+
+Do not diagnose the user.
+
+Do not make professional medical, legal, or financial decisions for the user.
+
+If the request involves danger, illegal activity, self-harm, or another unsafe situation, do not provide instructions for carrying it out. Give a safe, appropriate next action instead.
+
+${continuationContext}
+
+FINAL CHECK BEFORE RESPONDING:
+
+1. Exactly one primary next action.
+2. It is concrete.
+3. It can begin immediately.
+4. It addresses the actual situation.
+5. It does not repeat a completed step.
+6. It is not a disguised plan.
+7. The explanation is concise.
+8. The time estimate is realistic.
+9. The ignore items are genuinely useful.
+10. Return JSON only.
+
+Return the JSON now.
 `.trim();
+}
 
+function validateResult(value: unknown): NextStepResult {
+  const validated = nextStepSchema.safeParse(value);
+
+  if (!validated.success) {
+    console.error("NEXT_STEP_INVALID_STRUCTURE:", validated.error.flatten());
+    throw new Error("The AI response failed validation.");
+  }
+
+  const result = validated.data;
+
+  if (!result.nextStep.trim()) {
+    throw new Error("The AI returned an empty next step.");
+  }
+
+  if (!result.why.trim()) {
+    throw new Error("The AI returned an empty explanation.");
+  }
+
+  if (!result.time.trim()) {
+    throw new Error("The AI returned an empty time estimate.");
+  }
+
+  if (result.ignore.length === 0) {
+    throw new Error("The AI returned no ignore items.");
+  }
+
+  return result;
+}
+
+async function generateOnce(
+  userPrompt: string
+): Promise<NextStepResult> {
   const response = await client.chatCompletion({
     model: MODEL,
     messages: [
@@ -125,8 +219,8 @@ Return ONLY the JSON object.
         content: userPrompt,
       },
     ],
-    max_tokens: 500,
-    temperature: 0.2,
+    max_tokens: MAX_OUTPUT_TOKENS,
+    temperature: TEMPERATURE,
   });
 
   const content = response.choices?.[0]?.message?.content;
@@ -139,19 +233,50 @@ Return ONLY the JSON object.
 
   try {
     parsed = extractJson(content);
-  } catch {
-    console.error("HF returned an unreadable response:", content);
+  } catch (error) {
+    console.error("NEXT_STEP_INVALID_JSON:", {
+      error,
+      content: content.slice(0, 2000),
+    });
 
-    throw new Error("The AI returned an invalid structured response.");
+    throw new Error("The AI returned invalid JSON.");
   }
 
-  const validated = nextStepSchema.safeParse(parsed);
+  return validateResult(parsed);
+}
 
-  if (!validated.success) {
-    console.error("HF returned an invalid structure:", parsed);
+export async function generateNextStep(
+  options: GenerateNextStepOptions
+): Promise<NextStepResult> {
+  const problem = options.problem.trim();
+  const completedStep = options.completedStep?.trim();
 
-    throw new Error("The AI response did not match the required format.");
+  if (!problem) {
+    throw new Error("A problem is required.");
   }
 
-  return validated.data;
+  const userPrompt = buildUserPrompt({
+    problem,
+    completedStep: completedStep || undefined,
+  });
+
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await generateOnce(userPrompt);
+    } catch (error) {
+      lastError = error;
+
+      console.error(`NEXT_STEP_AI_ATTEMPT_${attempt}_FAILED:`, error);
+
+      if (attempt < MAX_ATTEMPTS) {
+        await sleep(RETRY_BASE_DELAY_MS * attempt);
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("AI generation failed.");
 }
