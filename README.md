@@ -29,17 +29,17 @@ The goal is simple:
 ## Features
 
 * **One-action AI guidance** — generates a single practical next step instead of a long plan.
-* **Context-aware progression** — after completing a step, the next recommendation builds on that progress.
+* **Context-aware progression** — recommendations can build on the user's previous progress.
 * **Concise reasoning** — explains why the action comes first.
-* **Time estimate** — provides a realistic estimate for the action.
+* **Time estimate** — provides an estimated amount of time for the action.
 * **Focus protection** — identifies what to ignore for now.
 * **Input validation** — protects the API from malformed and oversized requests.
-* **Rate limiting** — limits repeated requests to protect the service.
+* **Rate limiting** — helps prevent excessive repeated requests.
 * **Structured AI responses** — validates generated responses before returning them to the interface.
-* **Copy action** — quickly copy the recommended next step.
+* **Copy action** — makes it easy to copy the recommended next step.
 * **No account required** — designed for immediate use.
 * **Responsive interface** — works across desktop and smaller screens.
-* **Minimal interface** — intentionally avoids unnecessary dashboards, menus, and distractions.
+* **Minimal interface** — avoids unnecessary dashboards, menus, and distractions.
 
 ## The Core Experience
 
@@ -47,11 +47,11 @@ A user starts with something like:
 
 > "I have an idea for an app but I don't know where to start."
 
-Instead of receiving a 20-step roadmap, One Next Step might identify one immediate action.
+Instead of receiving a 20-step roadmap, One Next Step identifies one immediate action.
 
 The user completes it.
 
-Then the application uses the original problem and the completed action to determine the next meaningful move.
+Then the application uses the original situation and previous progress to determine the next meaningful move.
 
 This creates a focused progression without overwhelming the user.
 
@@ -73,19 +73,22 @@ Next.js Interface
   └── Request handling
           │
           ▼
-     AI Provider
+      AI Provider
           │
           ▼
-   Hugging Face Inference
+        Ollama
           │
           ▼
- Structured JSON response
+     Local AI Model
           │
           ▼
-     Schema validation
+   Structured Response
           │
           ▼
-     One Next Step UI
+     Schema Validation
+          │
+          ▼
+    One Next Step UI
 ```
 
 The AI is instructed to prioritize:
@@ -102,10 +105,10 @@ The AI is instructed to prioritize:
 * **React**
 * **TypeScript**
 * **Tailwind CSS**
-* **Hugging Face Inference**
-* **Qwen/Qwen3-4B-Instruct-2507**
+* **Ollama**
+* **Llama 3.2 3B**
 * **Zod** for structured response validation
-* **Vercel** for deployment
+* **Vercel** for web deployment
 * **GitHub** for source control
 
 ## Project Structure
@@ -146,13 +149,39 @@ Install dependencies:
 npm install
 ```
 
-Create a local environment file:
+Make sure Ollama is installed and running.
 
-```text
-HF_TOKEN=your_hugging_face_token
+Check that Ollama is available:
+
+```bash
+ollama --version
 ```
 
-Then start the development server:
+Check the installed models:
+
+```bash
+ollama list
+```
+
+The current local AI model is:
+
+```text
+llama3.2:3b
+```
+
+If the model has not been downloaded yet:
+
+```bash
+ollama pull llama3.2:3b
+```
+
+Start the Ollama model:
+
+```bash
+ollama run llama3.2:3b
+```
+
+Then, in the project directory, start the Next.js development server:
 
 ```bash
 npm run dev
@@ -164,35 +193,51 @@ Open:
 http://localhost:3000
 ```
 
-For a production build:
+If port 3000 is already being used, Next.js may automatically use another available port such as:
+
+```text
+http://localhost:3001
+```
+
+## Environment Variables
+
+One Next Step does not require a Hugging Face token for its local AI engine.
+
+If the application uses additional external services, configure their required environment variables in `.env.local`.
+
+**Never commit `.env.local` or private API keys to GitHub.**
+
+## Development Checks
+
+Before committing changes, run the TypeScript check:
+
+```bash
+.\node_modules\.bin\tsc.cmd --noEmit
+```
+
+A clean project should complete this command without TypeScript errors.
+
+You can also create a production build:
 
 ```bash
 npm run build
 ```
 
-Then run the production server:
+Then run:
 
 ```bash
 npm run start
 ```
 
-## Environment Variables
-
-The application requires a Hugging Face access token.
-
-```text
-HF_TOKEN=your_hugging_face_token
-```
-
-Keep this value private and never commit your `.env.local` file to GitHub.
-
 ## Production
 
-One Next Step is deployed as a production web application.
+One Next Step is designed as a web application and its source code is maintained in GitHub.
 
 **Live application:**
 
 https://one-next-step.vercel.app
+
+> **Important:** the current AI engine uses Ollama running locally. A Vercel deployment cannot directly access an Ollama instance running on your personal Windows computer. Production AI therefore requires a separately hosted AI endpoint or another production-compatible provider.
 
 ## Design Philosophy
 
@@ -212,17 +257,16 @@ The design reinforces the product philosophy:
 
 ## Security & Reliability
 
-The API includes several protections:
+The API includes protections such as:
 
 * Request validation
 * Maximum input lengths
 * Rate limiting
 * Structured AI output validation
-* JSON extraction safeguards
-* Retry handling for temporary AI failures
+* JSON parsing safeguards
 * Server-side environment variable protection
 
-AI-generated responses are validated before they are returned to the client.
+AI-generated responses are validated before being returned to the client.
 
 ## Author
 
@@ -232,7 +276,7 @@ One Next Step is an independent project exploring how AI can help people move fr
 
 ## Status
 
-**Production-ready**
+**Active Development**
 
 The core experience is intentionally focused:
 

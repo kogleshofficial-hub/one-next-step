@@ -1,26 +1,23 @@
-import { InferenceClient } from "@huggingface/inference";
 import { nextStepSchema, type NextStepResult } from "../lib/ai";
 import { NEXT_STEP_SYSTEM_PROMPT } from "../lib/prompts";
-
-const token = process.env.HF_TOKEN;
-
-if (!token) {
-  throw new Error("HF_TOKEN is not configured.");
-}
-
-const client = new InferenceClient(token);
-
-const MODEL = "Qwen/Qwen3-4B-Instruct-2507";
-
-const MAX_ATTEMPTS = 3;
-const RETRY_BASE_DELAY_MS = 500;
-const MAX_OUTPUT_TOKENS = 500;
-const TEMPERATURE = 0.15;
 
 type GenerateNextStepOptions = {
   problem: string;
   completedStep?: string;
 };
+
+type OllamaResponse = {
+  message?: {
+    content?: unknown;
+  };
+};
+
+const MODEL = "llama3.2:3b";
+const OLLAMA_URL = "http://127.0.0.1:11434/api/chat";
+
+const MAX_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 500;
+const MAX_OUTPUT_TOKENS = 500;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -36,8 +33,6 @@ function extractJson(text: string): unknown {
   try {
     return JSON.parse(cleaned);
   } catch {
-    // Some models occasionally add a short sentence before the JSON.
-    // Recover the outermost JSON object without accepting arbitrary prose.
     const firstBrace = cleaned.indexOf("{");
     const lastBrace = cleaned.lastIndexOf("}");
 
@@ -179,7 +174,11 @@ function validateResult(value: unknown): NextStepResult {
   const validated = nextStepSchema.safeParse(value);
 
   if (!validated.success) {
-    console.error("NEXT_STEP_INVALID_STRUCTURE:", validated.error.flatten());
+    console.error(
+      "NEXT_STEP_INVALID_STRUCTURE:",
+      validated.error.flatten()
+    );
+
     throw new Error("The AI response failed validation.");
   }
 
@@ -207,26 +206,64 @@ function validateResult(value: unknown): NextStepResult {
 async function generateOnce(
   userPrompt: string
 ): Promise<NextStepResult> {
-  const response = await client.chatCompletion({
-    model: MODEL,
-    messages: [
-      {
-        role: "system",
-        content: NEXT_STEP_SYSTEM_PROMPT,
+  const response = await fetch(OLLAMA_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content: `
+${NEXT_STEP_SYSTEM_PROMPT}
+
+IMPORTANT:
+Return ONLY valid JSON.
+No Markdown.
+No code fences.
+No explanation outside the JSON object.
+          `.trim(),
+        },
+        {
+          role: "user",
+          content: userPrompt,
+        },
+      ],
+      stream: false,
+      format: "json",
+      options: {
+        temperature: 0.15,
+        num_ctx: 8192,
       },
-      {
-        role: "user",
-        content: userPrompt,
-      },
-    ],
-    max_tokens: MAX_OUTPUT_TOKENS,
-    temperature: TEMPERATURE,
+    }),
+    cache: "no-store",
   });
 
-  const content = response.choices?.[0]?.message?.content;
+  if (!response.ok) {
+    const errorText = await response.text();
 
-  if (!content || typeof content !== "string") {
-    throw new Error("The AI returned an empty response.");
+    console.error(
+      "OLLAMA_ERROR:",
+      response.status,
+      errorText
+    );
+
+    throw new Error(
+      "The local AI engine could not be reached. Make sure Ollama is running."
+    );
+  }
+
+  const data: OllamaResponse = await response.json();
+
+  const content =
+    typeof data.message?.content === "string"
+      ? data.message.content.trim()
+      : "";
+
+  if (!content) {
+    throw new Error("The local AI engine returned no analysis.");
   }
 
   let parsed: unknown;
@@ -262,13 +299,20 @@ export async function generateNextStep(
 
   let lastError: unknown;
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+  for (
+    let attempt = 1;
+    attempt <= MAX_ATTEMPTS;
+    attempt += 1
+  ) {
     try {
       return await generateOnce(userPrompt);
     } catch (error) {
       lastError = error;
 
-      console.error(`NEXT_STEP_AI_ATTEMPT_${attempt}_FAILED:`, error);
+      console.error(
+        `NEXT_STEP_AI_ATTEMPT_${attempt}_FAILED:`,
+        error
+      );
 
       if (attempt < MAX_ATTEMPTS) {
         await sleep(RETRY_BASE_DELAY_MS * attempt);
