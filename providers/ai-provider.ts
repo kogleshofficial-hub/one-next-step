@@ -17,7 +17,6 @@ const OLLAMA_URL = "http://127.0.0.1:11434/api/chat";
 
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 500;
-const MAX_OUTPUT_TOKENS = 500;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -36,18 +35,12 @@ function extractJson(text: string): unknown {
     const firstBrace = cleaned.indexOf("{");
     const lastBrace = cleaned.lastIndexOf("}");
 
-    if (
-      firstBrace === -1 ||
-      lastBrace === -1 ||
-      lastBrace <= firstBrace
-    ) {
+    if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
       throw new Error("No JSON object was found in the AI response.");
     }
 
-    const candidate = cleaned.slice(firstBrace, lastBrace + 1);
-
     try {
-      return JSON.parse(candidate);
+      return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
     } catch {
       throw new Error("The AI returned malformed JSON.");
     }
@@ -68,9 +61,7 @@ ${problem}
 STEP THE USER ALREADY COMPLETED:
 ${completedStep}
 
-The completed step is genuine progress.
-
-Your job is to identify the NEXT smallest meaningful action.
+Identify the NEXT smallest meaningful action.
 
 The new action MUST:
 - logically follow from the completed step;
@@ -78,8 +69,7 @@ The new action MUST:
 - address the next meaningful bottleneck;
 - be possible to begin immediately;
 - contain exactly ONE primary action;
-- not become a checklist or multi-step plan;
-- remain proportional to the original problem.
+- not become a checklist or multi-step plan.
 `
     : `
 ORIGINAL PROBLEM:
@@ -92,19 +82,12 @@ Identify the smallest meaningful action that creates real forward movement.
 The action MUST:
 - address the actual blocker;
 - be specific enough to begin immediately;
-- be meaningful rather than merely easy;
 - contain exactly ONE primary action;
 - not become a checklist or multi-step plan.
 `;
 
   return `
 Return ONLY one valid JSON object.
-
-No Markdown.
-No code fences.
-No introduction.
-No explanation outside the JSON.
-No additional fields.
 
 Required JSON shape:
 
@@ -119,52 +102,21 @@ Required JSON shape:
   ]
 }
 
-CRITICAL RULE:
+CRITICAL:
+"nextStep" must contain exactly ONE primary action.
 
-"nextStep" must describe ONE primary action.
+Do not hide multiple actions using:
+"and then", "then", "after that", "followed by", "while", or "also".
 
-Do NOT hide multiple actions inside one sentence using words such as:
-"and then"
-"then"
-"after that"
-"followed by"
-"while"
-"also"
-
-If completing the action naturally requires several tiny physical movements, that is acceptable. But the user should have ONE clear objective, not a sequence of objectives.
-
-"ignore" should contain 2–4 relevant distractions, premature concerns, or later decisions.
-
-"why" should normally be 1–2 concise sentences.
-
-"time" should be realistic and simple, such as:
-"5 minutes"
-"10 minutes"
-"15–20 minutes"
-"30 minutes"
+"ignore" should contain 2–4 useful distractions or later decisions.
 
 Do not invent facts about the user.
-
 Do not diagnose the user.
+Do not make professional medical, legal, or financial decisions.
 
-Do not make professional medical, legal, or financial decisions for the user.
-
-If the request involves danger, illegal activity, self-harm, or another unsafe situation, do not provide instructions for carrying it out. Give a safe, appropriate next action instead.
+If the request involves danger, illegal activity, self-harm, or another unsafe situation, give a safe appropriate next action instead.
 
 ${continuationContext}
-
-FINAL CHECK BEFORE RESPONDING:
-
-1. Exactly one primary next action.
-2. It is concrete.
-3. It can begin immediately.
-4. It addresses the actual situation.
-5. It does not repeat a completed step.
-6. It is not a disguised plan.
-7. The explanation is concise.
-8. The time estimate is realistic.
-9. The ignore items are genuinely useful.
-10. Return JSON only.
 
 Return the JSON now.
 `.trim();
@@ -182,25 +134,7 @@ function validateResult(value: unknown): NextStepResult {
     throw new Error("The AI response failed validation.");
   }
 
-  const result = validated.data;
-
-  if (!result.nextStep.trim()) {
-    throw new Error("The AI returned an empty next step.");
-  }
-
-  if (!result.why.trim()) {
-    throw new Error("The AI returned an empty explanation.");
-  }
-
-  if (!result.time.trim()) {
-    throw new Error("The AI returned an empty time estimate.");
-  }
-
-  if (result.ignore.length === 0) {
-    throw new Error("The AI returned no ignore items.");
-  }
-
-  return result;
+  return validated.data;
 }
 
 async function generateOnce(
@@ -235,7 +169,8 @@ No explanation outside the JSON object.
       format: "json",
       options: {
         temperature: 0.15,
-        num_ctx: 8192,
+        num_ctx: 4096,
+        num_predict: 300,
       },
     }),
     cache: "no-store",
@@ -244,11 +179,7 @@ No explanation outside the JSON object.
   if (!response.ok) {
     const errorText = await response.text();
 
-    console.error(
-      "OLLAMA_ERROR:",
-      response.status,
-      errorText
-    );
+    console.error("OLLAMA_ERROR:", response.status, errorText);
 
     throw new Error(
       "The local AI engine could not be reached. Make sure Ollama is running."
@@ -299,11 +230,7 @@ export async function generateNextStep(
 
   let lastError: unknown;
 
-  for (
-    let attempt = 1;
-    attempt <= MAX_ATTEMPTS;
-    attempt += 1
-  ) {
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
       return await generateOnce(userPrompt);
     } catch (error) {
