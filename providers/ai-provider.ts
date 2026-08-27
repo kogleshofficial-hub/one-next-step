@@ -6,45 +6,22 @@ type GenerateNextStepOptions = {
   completedStep?: string;
 };
 
-type OllamaResponse = {
-  message?: {
-    content?: unknown;
-  };
+type OpenRouterResponse = {
+  choices?: Array<{
+    message?: {
+      content?: unknown;
+    };
+  }>;
 };
 
-const MODEL = "llama3.2:3b";
-const OLLAMA_URL = "http://127.0.0.1:11434/api/chat";
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const MODEL = "openrouter/free";
 
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 2;
 const RETRY_BASE_DELAY_MS = 500;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function extractJson(text: string): unknown {
-  const cleaned = text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    const firstBrace = cleaned.indexOf("{");
-    const lastBrace = cleaned.lastIndexOf("}");
-
-    if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
-      throw new Error("No JSON object was found in the AI response.");
-    }
-
-    try {
-      return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
-    } catch {
-      throw new Error("The AI returned malformed JSON.");
-    }
-  }
 }
 
 function buildUserPrompt({
@@ -61,6 +38,8 @@ ${problem}
 STEP THE USER ALREADY COMPLETED:
 ${completedStep}
 
+The completed step is genuine progress.
+
 Identify the NEXT smallest meaningful action.
 
 The new action MUST:
@@ -69,7 +48,8 @@ The new action MUST:
 - address the next meaningful bottleneck;
 - be possible to begin immediately;
 - contain exactly ONE primary action;
-- not become a checklist or multi-step plan.
+- not become a checklist or multi-step plan;
+- remain proportional to the original problem.
 `
     : `
 ORIGINAL PROBLEM:
@@ -82,44 +62,71 @@ Identify the smallest meaningful action that creates real forward movement.
 The action MUST:
 - address the actual blocker;
 - be specific enough to begin immediately;
+- be meaningful rather than merely easy;
 - contain exactly ONE primary action;
 - not become a checklist or multi-step plan.
 `;
 
   return `
-Return ONLY one valid JSON object.
+Return exactly one structured result.
 
-Required JSON shape:
+"nextStep" must contain ONE primary action.
 
-{
-  "nextStep": "one specific action",
-  "why": "a brief explanation of why this comes first",
-  "time": "a realistic estimate",
-  "ignore": [
-    "thing to ignore for now",
-    "thing to ignore for now",
-    "thing to ignore for now"
-  ]
-}
-
-CRITICAL:
-"nextStep" must contain exactly ONE primary action.
-
-Do not hide multiple actions using:
+Do not hide multiple actions inside one sentence using:
 "and then", "then", "after that", "followed by", "while", or "also".
 
-"ignore" should contain 2–4 useful distractions or later decisions.
+"ignore" should contain 2–4 things the user should deliberately ignore for now.
+
+"why" should be concise.
+
+"time" should be a realistic estimate such as:
+"5 minutes", "10 minutes", "15–20 minutes", or "30 minutes".
 
 Do not invent facts about the user.
 Do not diagnose the user.
-Do not make professional medical, legal, or financial decisions.
 
 If the request involves danger, illegal activity, self-harm, or another unsafe situation, give a safe appropriate next action instead.
 
 ${continuationContext}
 
-Return the JSON now.
+FINAL CHECK:
+1. Exactly one primary next action.
+2. Concrete.
+3. Immediately actionable.
+4. Addresses the actual situation.
+5. Does not repeat a completed step.
+6. Not a disguised multi-step plan.
+7. Concise explanation.
+8. Realistic time.
+9. Useful ignore items.
+
+Return JSON only.
 `.trim();
+}
+
+function extractJson(text: string): unknown {
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const firstBrace = cleaned.indexOf("{");
+    const lastBrace = cleaned.lastIndexOf("}");
+
+    if (
+      firstBrace === -1 ||
+      lastBrace === -1 ||
+      lastBrace <= firstBrace
+    ) {
+      throw new Error("No JSON object was found.");
+    }
+
+    return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
+  }
 }
 
 function validateResult(value: unknown): NextStepResult {
@@ -140,10 +147,19 @@ function validateResult(value: unknown): NextStepResult {
 async function generateOnce(
   userPrompt: string
 ): Promise<NextStepResult> {
-  const response = await fetch(OLLAMA_URL, {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY is not configured.");
+  }
+
+  const response = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: {
+      "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json",
+      "HTTP-Referer": "https://one-next-step.vercel.app",
+      "X-Title": "One Next Step",
     },
     body: JSON.stringify({
       model: MODEL,
@@ -153,7 +169,6 @@ async function generateOnce(
           content: `
 ${NEXT_STEP_SYSTEM_PROMPT}
 
-IMPORTANT:
 Return ONLY valid JSON.
 No Markdown.
 No code fences.
@@ -165,12 +180,10 @@ No explanation outside the JSON object.
           content: userPrompt,
         },
       ],
-      stream: false,
-      format: "json",
-      options: {
-        temperature: 0.15,
-        num_ctx: 4096,
-        num_predict: 300,
+      temperature: 0.15,
+      max_tokens: 300,
+      response_format: {
+        type: "json_object",
       },
     }),
     cache: "no-store",
@@ -179,38 +192,27 @@ No explanation outside the JSON object.
   if (!response.ok) {
     const errorText = await response.text();
 
-    console.error("OLLAMA_ERROR:", response.status, errorText);
-
-    throw new Error(
-      "The local AI engine could not be reached. Make sure Ollama is running."
+    console.error(
+      "OPENROUTER_ERROR:",
+      response.status,
+      errorText
     );
+
+    throw new Error("OpenRouter AI request failed.");
   }
 
-  const data: OllamaResponse = await response.json();
+  const data: OpenRouterResponse = await response.json();
 
   const content =
-    typeof data.message?.content === "string"
-      ? data.message.content.trim()
+    typeof data.choices?.[0]?.message?.content === "string"
+      ? data.choices[0].message.content.trim()
       : "";
 
   if (!content) {
-    throw new Error("The local AI engine returned no analysis.");
+    throw new Error("The AI returned no result.");
   }
 
-  let parsed: unknown;
-
-  try {
-    parsed = extractJson(content);
-  } catch (error) {
-    console.error("NEXT_STEP_INVALID_JSON:", {
-      error,
-      content: content.slice(0, 2000),
-    });
-
-    throw new Error("The AI returned invalid JSON.");
-  }
-
-  return validateResult(parsed);
+  return validateResult(extractJson(content));
 }
 
 export async function generateNextStep(
@@ -230,7 +232,11 @@ export async function generateNextStep(
 
   let lastError: unknown;
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+  for (
+    let attempt = 1;
+    attempt <= MAX_ATTEMPTS;
+    attempt += 1
+  ) {
     try {
       return await generateOnce(userPrompt);
     } catch (error) {
