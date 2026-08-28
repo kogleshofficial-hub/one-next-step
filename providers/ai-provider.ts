@@ -10,15 +10,22 @@ type OpenRouterResponse = {
   choices?: Array<{
     message?: {
       content?: unknown;
+      reasoning?: unknown;
     };
   }>;
+  error?: {
+    message?: string;
+    code?: string | number;
+  };
 };
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL = "google/gemma-4-31b-it:free";
 
-const MAX_ATTEMPTS = 2;
-const RETRY_BASE_DELAY_MS = 500;
+// OpenRouter automatically selects an available free model.
+const MODEL = "openrouter/free";
+
+const MAX_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 700;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -68,7 +75,9 @@ The action MUST:
 `;
 
   return `
-Return exactly one JSON object with this structure:
+Return exactly one valid JSON object.
+
+Required structure:
 
 {
   "nextStep": "one specific action",
@@ -81,38 +90,21 @@ Return exactly one JSON object with this structure:
   ]
 }
 
-"nextStep" must contain exactly ONE primary action.
+Rules:
 
-Do not hide multiple actions inside one sentence using:
-"and then", "then", "after that", "followed by", "while", or "also".
-
-"ignore" should contain 2–4 relevant distractions, premature concerns, or later decisions.
-
-"why" should be concise.
-
-"time" should be realistic, such as:
-"5 minutes", "10 minutes", "15–20 minutes", or "30 minutes".
-
-Do not invent facts about the user.
-Do not diagnose the user.
-
-If the request involves danger, illegal activity, self-harm, or another unsafe situation, give a safe appropriate next action instead.
+- "nextStep" MUST contain exactly ONE primary action.
+- Do not create a checklist.
+- Do not hide multiple objectives inside one sentence.
+- "why" should be concise.
+- "time" should be realistic.
+- "ignore" must contain 2–4 useful distractions or later concerns.
+- Do not invent facts about the user.
+- Do not diagnose the user.
+- If the request is unsafe, provide a safe appropriate next action instead.
 
 ${continuationContext}
 
-FINAL CHECK:
-1. Exactly one primary next action.
-2. Concrete.
-3. Immediately actionable.
-4. Addresses the actual situation.
-5. Does not repeat a completed step.
-6. Not a disguised multi-step plan.
-7. Concise explanation.
-8. Realistic time.
-9. Useful ignore items.
-10. Valid JSON only.
-
-Return the JSON object now.
+Return JSON only.
 `.trim();
 }
 
@@ -134,7 +126,7 @@ function extractJson(text: string): unknown {
       lastBrace === -1 ||
       lastBrace <= firstBrace
     ) {
-      throw new Error("No JSON object was found.");
+      throw new Error("No JSON object found in AI response.");
     }
 
     const candidate = cleaned.slice(firstBrace, lastBrace + 1);
@@ -142,7 +134,7 @@ function extractJson(text: string): unknown {
     try {
       return JSON.parse(candidate);
     } catch {
-      throw new Error("The AI returned malformed JSON.");
+      throw new Error("AI returned malformed JSON.");
     }
   }
 }
@@ -156,25 +148,25 @@ function validateResult(value: unknown): NextStepResult {
       validated.error.flatten()
     );
 
-    throw new Error("The AI response failed validation.");
+    throw new Error("AI response failed validation.");
   }
 
   const result = validated.data;
 
   if (!result.nextStep.trim()) {
-    throw new Error("The AI returned an empty next step.");
+    throw new Error("AI returned an empty next step.");
   }
 
   if (!result.why.trim()) {
-    throw new Error("The AI returned an empty explanation.");
+    throw new Error("AI returned an empty explanation.");
   }
 
   if (!result.time.trim()) {
-    throw new Error("The AI returned an empty time estimate.");
+    throw new Error("AI returned an empty time estimate.");
   }
 
   if (result.ignore.length === 0) {
-    throw new Error("The AI returned no ignore items.");
+    throw new Error("AI returned no ignore items.");
   }
 
   return result;
@@ -191,24 +183,28 @@ async function generateOnce(
 
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
+
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       "HTTP-Referer": "https://one-next-step.vercel.app",
       "X-Title": "One Next Step",
     },
+
     body: JSON.stringify({
       model: MODEL,
+
       messages: [
         {
           role: "system",
           content: `
 ${NEXT_STEP_SYSTEM_PROMPT}
 
-Return ONLY valid JSON.
+IMPORTANT:
+Return ONLY one valid JSON object.
 No Markdown.
 No code fences.
-No explanation outside the JSON object.
+No explanation outside the JSON.
           `.trim(),
         },
         {
@@ -216,38 +212,80 @@ No explanation outside the JSON object.
           content: userPrompt,
         },
       ],
-      temperature: 0.15,
-      max_tokens: 300,
+
+      temperature: 0.1,
+      max_tokens: 500,
+
+      // Ask OpenRouter for structured JSON.
+      response_format: {
+        type: "json_object",
+      },
+
+      stream: false,
     }),
+
     cache: "no-store",
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
+  const rawText = await response.text();
 
+  let data: OpenRouterResponse;
+
+  try {
+    data = JSON.parse(rawText) as OpenRouterResponse;
+  } catch {
+    console.error(
+      "OPENROUTER_INVALID_RESPONSE:",
+      rawText.slice(0, 4000)
+    );
+
+    throw new Error("OpenRouter returned an invalid response.");
+  }
+
+  if (!response.ok) {
     console.error(
       "OPENROUTER_ERROR:",
       response.status,
-      errorText
+      JSON.stringify(data).slice(0, 4000)
     );
 
-    throw new Error("OpenRouter AI request failed.");
+    throw new Error(
+      data.error?.message ??
+        `OpenRouter request failed with status ${response.status}.`
+    );
   }
 
-  const data: OpenRouterResponse = await response.json();
+  const messageContent = data.choices?.[0]?.message?.content;
 
-  const content =
-    typeof data.choices?.[0]?.message?.content === "string"
-      ? data.choices[0].message.content.trim()
-      : "";
+  let content = "";
+
+  if (typeof messageContent === "string") {
+    content = messageContent.trim();
+  } else if (Array.isArray(messageContent)) {
+    content = messageContent
+      .map((part) => {
+        if (
+          typeof part === "object" &&
+          part !== null &&
+          "text" in part &&
+          typeof part.text === "string"
+        ) {
+          return part.text;
+        }
+
+        return "";
+      })
+      .join("")
+      .trim();
+  }
 
   if (!content) {
     console.error(
       "OPENROUTER_EMPTY_RESPONSE:",
-      JSON.stringify(data).slice(0, 4000)
+      JSON.stringify(data).slice(0, 6000)
     );
 
-    throw new Error("The AI returned no result.");
+    throw new Error("The AI returned no usable result.");
   }
 
   return validateResult(extractJson(content));
