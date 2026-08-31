@@ -1,283 +1,142 @@
-# One Next Step
+# One Next Step 🧠
 
 > **You don't need the whole plan. You need the next move.**
 
-![One Next Step — AI decision tool](./public/one-next-step-preview.png)
+One Next Step is a focused AI decision tool for moments when you are stuck, overwhelmed, confused, or unsure where to begin.
 
-One Next Step is a focused AI decision tool designed for moments when you're stuck, overwhelmed, confused, or unsure where to begin.
+Instead of producing another giant plan, it identifies **one concrete action you can take right now**.
 
-Instead of generating a huge plan, it identifies **one concrete action** you can take right now.
+## 🚀 Try it
 
-Complete that action, come back, and One Next Step determines what should come next.
+**https://one-next-step.vercel.app/**
 
-## Why One Next Step?
+## The idea
 
-Most AI assistants can give you dozens of ideas.
+Most productivity tools help you manage everything.
 
-That's not always useful.
+One Next Step asks a smaller question:
 
-When you're already overwhelmed, more information can create more friction.
+> **What is the one useful thing I should do next?**
 
-One Next Step follows a different philosophy:
+The core loop is:
 
-**Problem → One Action → Progress → Next Action**
+```text
+Problem
+   ↓
+One Action
+   ↓
+Progress
+   ↓
+Next Action
+```
 
-The goal is simple:
+## ✨ Features
 
-> Leave the user knowing exactly what to do next.
+- 🎯 One-action AI guidance
+- 🧠 Context-aware progression
+- 💬 Concise reasoning for each recommendation
+- ⏱️ Estimated time for the action
+- 🚫 Focus protection — what to ignore for now
+- 🛡️ Input validation and request limits
+- 📋 Copyable next action
+- 👤 No account required
+- 📱 Responsive interface
+- ✨ Minimal, distraction-free UI
 
-## Features
-
-* **One-action AI guidance** — generates a single practical next step instead of a long plan.
-* **Context-aware progression** — recommendations can build on the user's previous progress.
-* **Concise reasoning** — explains why the action comes first.
-* **Time estimate** — provides an estimated amount of time for the action.
-* **Focus protection** — identifies what to ignore for now.
-* **Input validation** — protects the API from malformed and oversized requests.
-* **Rate limiting** — helps prevent excessive repeated requests.
-* **Structured AI responses** — validates generated responses before returning them to the interface.
-* **Copy action** — makes it easy to copy the recommended next step.
-* **No account required** — designed for immediate use.
-* **Responsive interface** — works across desktop and smaller screens.
-* **Minimal interface** — avoids unnecessary dashboards, menus, and distractions.
-
-## The Core Experience
-
-A user starts with something like:
-
-> "I have an idea for an app but I don't know where to start."
-
-Instead of receiving a 20-step roadmap, One Next Step identifies one immediate action.
-
-The user completes it.
-
-Then the application uses the original situation and previous progress to determine the next meaningful move.
-
-This creates a focused progression without overwhelming the user.
-
-## AI Architecture
-
-The application separates the AI logic from the user interface.
+## 🤖 AI architecture
 
 ```text
 User
-  │
-  ▼
-Next.js Interface
-  │
-  ▼
+  ↓
+Next.js interface
+  ↓
 /api/next-step
-  │
   ├── Input validation
   ├── Rate limiting
   └── Request handling
-          │
-          ▼
-      AI Provider
-          │
-          ▼
+          ↓
+       AI provider
+          ↓
         Ollama
-          │
-          ▼
-     Local AI Model
-          │
-          ▼
-   Structured Response
-          │
-          ▼
-     Schema Validation
-          │
-          ▼
+          ↓
+     Local AI model
+          ↓
+   Structured response
+          ↓
+    Schema validation
+          ↓
     One Next Step UI
 ```
 
-The AI is instructed to prioritize:
+The system prioritizes the user's actual situation, the smallest meaningful action, immediate usefulness, and logical progression.
 
-1. The user's actual situation
-2. The smallest meaningful action
-3. Immediate usability
-4. Logical progression
-5. Avoiding unnecessary complexity
+## 🛠️ Tech stack
 
-## Tech Stack
+- Next.js 16
+- React
+- TypeScript
+- Tailwind CSS
+- Ollama
+- Llama 3.2 3B
+- Zod
+- Vercel
+- GitHub
 
-* **Next.js 16**
-* **React**
-* **TypeScript**
-* **Tailwind CSS**
-* **Ollama**
-* **Llama 3.2 3B**
-* **Zod** for structured response validation
-* **Vercel** for web deployment
-* **GitHub** for source control
-
-## Project Structure
-
-```text
-one-next-step/
-│
-├── app/
-│   ├── api/
-│   │   └── next-step/
-│   │       └── route.ts
-│   │
-│   ├── icon.png
-│   ├── layout.tsx
-│   ├── page.tsx
-│   ├── robots.ts
-│   └── sitemap.ts
-│
-├── lib/
-│   ├── ai.ts
-│   └── prompts.ts
-│
-├── providers/
-│   └── ai-provider.ts
-│
-├── public/
-│
-├── .env.local
-├── package.json
-└── README.md
-```
-
-## Running Locally
-
-Install dependencies:
+## 💻 Run locally
 
 ```bash
 npm install
 ```
 
-Make sure Ollama is installed and running.
-
-Check that Ollama is available:
+Make sure Ollama is installed and running:
 
 ```bash
 ollama --version
-```
-
-Check the installed models:
-
-```bash
 ollama list
 ```
 
-The current local AI model is:
+The current local model is:
 
 ```text
 llama3.2:3b
 ```
 
-If the model has not been downloaded yet:
+If needed:
 
 ```bash
 ollama pull llama3.2:3b
 ```
 
-Start the Ollama model:
-
-```bash
-ollama run llama3.2:3b
-```
-
-Then, in the project directory, start the Next.js development server:
+Then run the application:
 
 ```bash
 npm run dev
 ```
 
-Open:
+Open `http://localhost:3000`.
 
-```text
-http://localhost:3000
-```
+## ⚠️ Deployment note
 
-If port 3000 is already being used, Next.js may automatically use another available port such as:
+The current AI engine uses Ollama running locally. A normal Vercel deployment cannot directly access an Ollama server running on a personal computer. A production AI endpoint therefore needs a separately hosted model or production-compatible provider.
 
-```text
-http://localhost:3001
-```
+## 🔐 Reliability
 
-## Environment Variables
+The API includes request validation, input limits, rate limiting, structured-response validation, JSON safeguards, and server-side handling of sensitive configuration.
 
-One Next Step does not require a Hugging Face token for its local AI engine.
+## 🎨 Design philosophy
 
-If the application uses additional external services, configure their required environment variables in `.env.local`.
-
-**Never commit `.env.local` or private API keys to GitHub.**
-
-## Development Checks
-
-Before committing changes, run the TypeScript check:
-
-```bash
-.\node_modules\.bin\tsc.cmd --noEmit
-```
-
-A clean project should complete this command without TypeScript errors.
-
-You can also create a production build:
-
-```bash
-npm run build
-```
-
-Then run:
-
-```bash
-npm run start
-```
-
-## Production
-
-One Next Step is designed as a web application and its source code is maintained in GitHub.
-
-**Live application:**
-
-https://one-next-step.vercel.app
-
-> **Important:** the current AI engine uses Ollama running locally. A Vercel deployment cannot directly access an Ollama instance running on your personal Windows computer. Production AI therefore requires a separately hosted AI endpoint or another production-compatible provider.
-
-## Design Philosophy
-
-The interface deliberately uses a minimal visual language.
-
-The product should feel:
-
-* Calm
-* Focused
-* Premium
-* Direct
-* Uncluttered
-
-The design reinforces the product philosophy:
+The interface intentionally stays calm and minimal.
 
 **Less information. More direction.**
 
-## Security & Reliability
+## 🚧 Status
 
-The API includes protections such as:
+**Active development.**
 
-* Request validation
-* Maximum input lengths
-* Rate limiting
-* Structured AI output validation
-* JSON parsing safeguards
-* Server-side environment variable protection
+This project is an experiment in using AI to reduce decision friction rather than increase information overload.
 
-AI-generated responses are validated before being returned to the client.
+## 👨‍💻 Creator
 
-## Author
+Built independently by **Koglesh R. Murugan**, a 16-year-old developer from Malaysia.
 
-**Koglesh R. Murugan**
-
-One Next Step is an independent project exploring how AI can help people move from uncertainty to action without overwhelming them with information.
-
-## Status
-
-**Active Development**
-
-The core experience is intentionally focused:
-
-> **One problem. One action. One next step.**
+**Live app:** https://one-next-step.vercel.app/
