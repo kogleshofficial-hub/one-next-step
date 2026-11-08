@@ -51,7 +51,7 @@ function ensureLocalAI(): Promise<void> {
 }
 
 function parseModelJson(text: string): unknown {
-  const cleaned = text.trim().replace(/^\`\`\`(?:json)?\\s*/i, "").replace(/\\s*\`\`\`$/i, "").trim();
+  const cleaned = text.trim().replace(/^\x60{3}(?:json)?\s*/i, "").replace(/\s*\x60{3}$/i, "").trim();
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
   if (start < 0 || end <= start) throw new Error("The on-device model returned an incomplete answer. Please try again.");
