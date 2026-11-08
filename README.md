@@ -2,9 +2,7 @@
 
 > **You don't need the whole plan. You need the next move.**
 
-One Next Step is a focused AI decision tool for moments when you are stuck, overwhelmed, confused, or unsure where to begin.
-
-Instead of producing another giant plan, it identifies **one concrete action you can take right now**.
+One Next Step is a focused tool for moments when you are stuck, overwhelmed, confused, or unsure where to begin. It uses a compact open-weight language model that runs directly in the visitor's browser to identify **one concrete action to take next**.
 
 ## 🚀 Try it
 
@@ -12,9 +10,7 @@ Instead of producing another giant plan, it identifies **one concrete action you
 
 ## The idea
 
-Most productivity tools help you manage everything.
-
-One Next Step asks a smaller question:
+Most productivity tools help you manage everything. One Next Step asks a smaller question:
 
 > **What is the one useful thing I should do next?**
 
@@ -30,113 +26,74 @@ Progress
 Next Action
 ```
 
-## ✨ Features
+## Features
 
-- 🎯 One-action AI guidance
-- 🧠 Context-aware progression
-- 💬 Concise reasoning for each recommendation
-- ⏱️ Estimated time for the action
-- 🚫 Focus protection — what to ignore for now
-- 🛡️ Input validation and request limits
-- 📋 Copyable next action
-- 👤 No account required
-- 📱 Responsive interface
-- ✨ Minimal, distraction-free UI
+- One-action AI guidance
+- Context-aware progression after a completed step
+- Concise reasoning for each recommendation
+- Estimated time for the action
+- Focus protection — what to ignore for now
+- Structured-output validation
+- Copyable next action
+- No account required
+- Responsive interface
 
-## 🤖 AI architecture
+## AI architecture
 
 ```text
-User
-  ↓
-Next.js interface
-  ↓
-/api/next-step
-  ├── Input validation
-  ├── Rate limiting
-  └── Request handling
-          ↓
-       AI provider
-          ↓
-        Ollama
-          ↓
-     Local AI model
-          ↓
-   Structured response
-          ↓
-    Schema validation
-          ↓
-    One Next Step UI
+Visitor's browser
+      ↓
+Transformers.js
+      ↓
+LFM2.5-350M quantized ONNX model
+      ↓
+WebGPU when available
+      ↓
+CPU/WASM fallback
+      ↓
+Validated structured response
+      ↓
+One Next Step UI
 ```
 
-The system prioritizes the user's actual situation, the smallest meaningful action, immediate usefulness, and logical progression.
+Inference happens on the visitor's device. The app does not send the problem to OpenRouter or another hosted AI inference API, and it does not need an AI API key.
 
-## 🛠️ Tech stack
+The first use downloads approximately 300 MB of model files from Hugging Face. Transformers.js caches model files in the browser when supported. Browser storage can be cleared or evicted, in which case a download may be needed again.
+
+## Tech stack
 
 - Next.js 16
-- React
+- React 19
 - TypeScript
 - Tailwind CSS
-- Ollama
-- Llama 3.2 3B
-- Zod
+- Hugging Face Transformers.js
+- LFM2.5-350M by Liquid AI
+- ONNX Runtime
 - Vercel
-- GitHub
+- GitHub Actions
 
-## 💻 Run locally
+## Run locally
 
 ```bash
 npm install
-```
-
-Make sure Ollama is installed and running:
-
-```bash
-ollama --version
-ollama list
-```
-
-The current local model is:
-
-```text
-llama3.2:3b
-```
-
-If needed:
-
-```bash
-ollama pull llama3.2:3b
-```
-
-Then run the application:
-
-```bash
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open `http://localhost:3000`. No Ollama service, paid AI provider, API key, or `.env.local` file is required.
 
-## ⚠️ Deployment note
+## Privacy and limitations
 
-The current AI engine uses Ollama running locally. A normal Vercel deployment cannot directly access an Ollama server running on a personal computer. A production AI endpoint therefore needs a separately hosted model or production-compatible provider.
+- The problem text is processed in the browser by the local model; it is not sent to a hosted AI inference provider.
+- The model download requires an internet connection the first time.
+- Inference uses the visitor's device, so speed depends on the phone or computer. WebGPU is used when available; CPU/WASM is the fallback.
+- This compact model can make mistakes. Treat its suggestions as assistance, not professional advice or guaranteed outcomes.
 
-## 🔐 Reliability
+## Model license
 
-The API includes request validation, input limits, rate limiting, structured-response validation, JSON safeguards, and server-side handling of sensitive configuration.
+LFM2.5-350M is distributed under the [LFM Open License v1.0](https://www.liquid.ai/lfm-license). The license permits commercial use subject to its $10 million annual-revenue threshold. Keep the license terms and attribution in place.
 
-## 🎨 Design philosophy
+## Creator
 
-The interface intentionally stays calm and minimal.
-
-**Less information. More direction.**
-
-## 🚧 Status
-
-**Active development.**
-
-This project is an experiment in using AI to reduce decision friction rather than increase information overload.
-
-## 👨‍💻 Creator
-
-Built independently by **Koglesh R. Murugan**, a 16-year-old developer from Malaysia.
+Built independently by **Koglesh R. Murugan**, a student developer from Malaysia.
 
 **Live app:** https://one-next-step.vercel.app/
