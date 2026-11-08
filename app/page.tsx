@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { NEXT_STEP_SYSTEM_PROMPT } from "../lib/prompts";
 
 type NextStepResult = {
   nextStep: string;
@@ -10,6 +11,57 @@ type NextStepResult = {
 };
 
 const MAX_PROBLEM_LENGTH = 1000;
+
+type LocalAIProgress = { status?: string; progress?: number; file?: string };
+type LocalAIMessage = { role: "system" | "user" | "assistant"; content: string };
+
+declare global {
+  interface Window {
+    localAI?: {
+      generate: (
+        messages: LocalAIMessage[],
+        onProgress?: (event: LocalAIProgress) => void,
+        maxNewTokens?: number
+      ) => Promise<string>;
+    };
+  }
+}
+
+let localAIScriptPromise: Promise<void> | null = null;
+
+function ensureLocalAI(): Promise<void> {
+  if (typeof window === "undefined") return Promise.reject(new Error("Local AI requires a browser."));
+  if (window.localAI) return Promise.resolve();
+
+  if (!localAIScriptPromise) {
+    localAIScriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.type = "module";
+      script.src = "/local-ai.js";
+      script.onload = () => resolve();
+      script.onerror = () => {
+        localAIScriptPromise = null;
+        reject(new Error("The local AI runtime could not load. Check your connection and try again."));
+      };
+      document.head.appendChild(script);
+    });
+  }
+
+  return localAIScriptPromise;
+}
+
+function parseModelJson(text: string): unknown {
+  const cleaned = text.trim().replace(/^\`\`\`(?:json)?\\s*/i, "").replace(/\\s*\`\`\`$/i, "").trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("The on-device model returned an incomplete answer. Please try again.");
+  try {
+    return JSON.parse(cleaned.slice(start, end + 1)) as unknown;
+  } catch {
+    throw new Error("The on-device model returned invalid structured output. Please try again.");
+  }
+}
+
 
 const EXAMPLES = [
   "I want to build my first website but I don't know where to start.",
@@ -41,72 +93,65 @@ export default function Home() {
   const [error, setError] = useState("");
   const [stepNumber, setStepNumber] = useState(1);
   const [copied, setCopied] = useState(false);
+  const [modelStatus, setModelStatus] = useState("");
 
   async function requestNextStep(
     currentProblem: string,
     completedStep?: string
   ) {
-    if (loading) {
-      return;
-    }
+    if (loading) return;
 
     setLoading(true);
     setError("");
     setCopied(false);
+    setModelStatus("Preparing the on-device model. The first download is about 300 MB and is cached by your browser.");
 
     try {
-      const response = await fetch("/api/next-step", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      await ensureLocalAI();
+      const continuation = completedStep
+        ? `The user has completed this previous action: ${completedStep}
+Continue from the original problem. Give the next smallest meaningful action. Do not repeat the completed action.`
+        : "This is the first action. Identify the smallest meaningful action that addresses the actual blocker.";
+
+      const userPrompt = `ORIGINAL PROBLEM:
+${currentProblem}
+
+${continuation}
+
+Return only one JSON object with exactly these fields:
+{"nextStep":"one specific action","why":"why this comes first","time":"realistic time estimate","ignore":["one distraction to ignore","another distraction to ignore"]}
+
+Rules: one primary action only; no checklist; do not invent facts; keep it specific, safe, practical, and proportional to the problem.`;
+
+      const generated = await window.localAI!.generate(
+        [
+          { role: "system", content: NEXT_STEP_SYSTEM_PROMPT },
+          { role: "user", content: userPrompt },
+        ],
+        (event) => {
+          if (event.status === "progress" && typeof event.progress === "number") {
+            setModelStatus(`Downloading model files: ${Math.round(event.progress)}% · This happens only on first use unless browser storage is cleared.`);
+          } else if (event.status === "initiate") {
+            setModelStatus("Downloading the local AI model. Keep this tab open for the first setup.");
+          } else if (event.status === "done") {
+            setModelStatus("Model ready. Generating your next step on this device…");
+          } else if (event.status === "ready") {
+            setModelStatus("Model ready. Generating your next step on this device…");
+          }
         },
-        body: JSON.stringify({
-          problem: currentProblem,
-          ...(completedStep ? { completedStep } : {}),
-        }),
-      });
+        220
+      );
 
-      const contentType = response.headers.get("content-type") ?? "";
-
-      if (!contentType.includes("application/json")) {
-        throw new Error(
-          "The server returned an unexpected response. Please try again."
-        );
+      const parsed = parseModelJson(generated);
+      if (!isValidResult(parsed)) {
+        throw new Error("The local model did not return the required next-step format. Please try once more with a little more context.");
       }
 
-      const data: unknown = await response.json();
-
-      if (!response.ok) {
-        const message =
-          typeof data === "object" &&
-          data !== null &&
-          "error" in data &&
-          typeof data.error === "string"
-            ? data.error
-            : "Something went wrong. Please try again.";
-
-        throw new Error(message);
-      }
-
-      if (!isValidResult(data)) {
-        throw new Error(
-          "We received an unexpected answer. Please try again."
-        );
-      }
-
-      setResult(data);
+      setResult(parsed);
+      setModelStatus("");
     } catch (err) {
-      if (err instanceof TypeError) {
-        setError(
-          "We couldn't reach One Next Step. Check your connection and try again."
-        );
-      } else {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Something went wrong. Please try again."
-        );
-      }
+      setError(err instanceof Error ? err.message : "The on-device AI could not complete this request.");
+      setModelStatus("");
     } finally {
       setLoading(false);
     }
@@ -375,6 +420,8 @@ export default function Home() {
                 </div>
               </form>
 
+              {loading && <p className="mt-4 text-xs leading-6 text-white/35" aria-live="polite">{modelStatus}</p>}
+
               {/* Examples */}
               <div className="mt-7">
                 <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/25">
@@ -408,12 +455,16 @@ export default function Home() {
               )}
 
               <div className="mt-8 flex flex-wrap gap-x-5 gap-y-2 text-xs text-white/20">
-                <span>No account required</span>
+                <span>Runs on your device</span>
                 <span>•</span>
-                <span>No giant plans</span>
+                <span>No AI API key or provider credits</span>
                 <span>•</span>
                 <span>One action at a time</span>
               </div>
+
+              <p className="mt-6 max-w-2xl text-[11px] leading-5 text-white/20">
+                Local AI: LFM2.5-350M by Liquid AI · <a className="underline underline-offset-2 hover:text-white/50" href="https://www.liquid.ai/lfm-license" target="_blank" rel="noreferrer">LFM Open License v1.0</a>. First use downloads approximately 300 MB; generation runs in this browser.
+              </p>
             </div>
           ) : (
             /* =========================
